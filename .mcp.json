@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "finance": {
+      "command": "C:\Users\aryan\Documents\Screen Ask\plaid-finance\.venv\Scripts\python.exe",
+      "args": ["C:\Users\aryan\Documents\Screen Ask\plaid-finance\server.py"]
+    }
+  }
+}
