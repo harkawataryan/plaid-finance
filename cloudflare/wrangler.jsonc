@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "finance-mcp",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [{ "pattern": "finance.aryanh.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "vars": {
+    // Every OAuth token is bound to this URL.
+    "MCP_RESOURCE": "https://finance.aryanh.dev/mcp",
+    // Only this GitHub account can sign in.
+    "ALLOWED_GITHUB_LOGIN": "harkawataryan",
+    "PLAID_ENV": "production"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "finance", "database_id": "4f7c8fd1-f522-4802-90dd-6b0808b9b6c4" }
+  ],
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "167c22051d974c5a965d98fa3cff8274" }
+  ],
+  // Sync from Plaid every 4 hours (UTC).
+  "triggers": { "crons": ["0 */4 * * *"] },
+  "observability": { "enabled": true },
+  "dev": { "port": 8788 },
+  "secrets": {
+    "required": ["PLAID_CLIENT_ID", "PLAID_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "COOKIE_ENCRYPTION_KEY"]
+  }
+}

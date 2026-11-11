@@ -1,0 +1,25 @@
+{
+  "name": "finance-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "type-check": "wrangler types && tsc --noEmit",
+    "db:schema": "wrangler d1 execute finance --remote --file=schema.sql",
+    "logs": "wrangler tail"
+  },
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "^1.2.4",
+    "@modelcontextprotocol/server": "2.3.1",
+    "agents": "^0.29.0",
+    "hono": "^4.12.27",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261110.1",
+    "typescript": "6.0.3",
+    "wrangler": "^4.105.0"
+  }
+}

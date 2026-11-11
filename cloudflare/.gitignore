@@ -1,0 +1,5 @@
+node_modules/
+.wrangler/
+.dev.vars
+*.sql.tmp
+worker-configuration.d.ts

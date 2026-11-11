@@ -35,6 +35,27 @@ Data auto-syncs when it's more than 6 hours old, or say "sync my accounts". Exam
 Tools: `sync_accounts`, `list_connections`, `list_accounts`, `net_worth`, `search_transactions`,
 `spending_summary`, `recurring_charges`, `get_holdings`, `investment_activity`, `query_finance_db`.
 
+## 5. Always-on hosted version (Cloudflare)
+`cloudflare/` is the same set of tools running as a Cloudflare Worker at
+`https://finance.aryanh.dev/mcp`, so web and phone MCP clients can use it without this PC.
+- Data lives in Cloudflare D1 (database `finance`, schema in `cloudflare/schema.sql`).
+- A cron trigger syncs from Plaid every 4 hours.
+- Sign-in is GitHub OAuth, limited to the account in `ALLOWED_GITHUB_LOGIN` (`wrangler.jsonc`).
+
+First deploy (sets secrets from `../.env` plus a pasted GitHub OAuth client secret):
+```
+cd cloudflare
+npm install
+..\.venv\Scripts\python deploy_with_secrets.py
+```
+Later deploys: `npx wrangler deploy` (secrets persist). Logs: `npx wrangler tail`.
+
+New Plaid connections made with `link_server.py` are saved locally; copy the new `items` row
+into D1 (`npx wrangler d1 execute finance --remote --command "INSERT ..."`) and the next sync fills in the rest.
+
+Other ways to run it: `remote_server.py` serves the local database through a private ngrok link
+while the PC is on, and `scheduled_sync.py` is a Task Scheduler entry point for local syncing.
+
 ## Notes
 - First transaction sync can take a few minutes on Plaid's side; if it comes back empty, sync again later.
 - If a bank asks you to log in again (`ITEM_LOGIN_REQUIRED`), rerun `link_server.py` and reconnect it.
