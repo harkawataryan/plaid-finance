@@ -230,6 +230,58 @@ function isPrimeMembership(t: Txn) {
 	return /prime/i.test(t.merchant) && !/(reta|mktp|marketplace)/i.test(t.description) || /prime (membership|video)/i.test(t.description);
 }
 
+function isPharmacy(t: Txn) {
+	return /pharma/i.test(t.description) || /pharma/i.test(t.merchant);
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Amounts the card may be charged for an order. Amazon usually charges per shipment, but not always:
+ * - a "Shipped" email's total can cover more than this order, so the order total is always a candidate;
+ * - several shipments can be charged together, so their sum is a candidate;
+ * - shipments that don't add up to the order total leave a remainder to be charged later.
+ */
+export function chargeUnits(orders: any[], shipments: any[]): Unit[] {
+	const units: Unit[] = shipments.map((s) => ({ key: s.email_id, order_id: s.order_id, date: s.date, amount: s.amount, estimate: false, kind: "shipment" as const }));
+	for (const o of orders) {
+		const ships = shipments.filter((s) => s.order_id === o.order_id);
+		const sumShip = round2(ships.reduce((a, s) => a + s.amount, 0));
+		if (o.order_total !== null && o.order_total > 0) {
+			units.push({ key: "order:" + o.order_id, order_id: o.order_id, date: o.order_date, amount: o.order_total, estimate: !!o.total_is_estimate, kind: "order" });
+			if (ships.length && sumShip < o.order_total - 0.005)
+				units.push({ key: "rest:" + o.order_id, order_id: o.order_id, date: ships.reduce((d, s) => (s.date > d ? s.date : d), o.order_date),
+					amount: round2(o.order_total - sumShip), estimate: !!o.total_is_estimate, kind: "order" });
+		}
+		if (ships.length > 1 && Math.abs(sumShip - (o.order_total ?? -1)) > 0.005)
+			units.push({ key: "allship:" + o.order_id, order_id: o.order_id, date: ships.reduce((d, s) => (s.date > d ? s.date : d), ships[0].date),
+				amount: sumShip, estimate: false, kind: "order" });
+	}
+	return units;
+}
+
+/** Unmatched units that really are still owed: alternatives for an order already charged another way are dropped. */
+export function pendingUnits(units: Unit[], unmatched: Unit[]): Unit[] {
+	const unmatchedKeys = new Set(unmatched.map((u) => u.key));
+	const matched = units.filter((u) => !unmatchedKeys.has(u.key));
+	const wholeCharged = new Set(matched.filter((u) => u.key.startsWith("order:") || u.key.startsWith("allship:")).map((u) => u.order_id));
+	const partlyCharged = new Set(matched.map((u) => u.order_id));
+	const out: Unit[] = [];
+	for (const u of unmatched) {
+		if (u.amount < 0.005) continue;                                               // free / fully discounted
+		if (wholeCharged.has(u.order_id)) continue;                                   // paid in one charge
+		const whole = u.key.startsWith("order:") || u.key.startsWith("allship:");
+		if (whole && partlyCharged.has(u.order_id)) continue;                         // being paid per shipment
+		if (!partlyCharged.has(u.order_id)) {
+			// Nothing charged yet: report the order once, as its total if known.
+			const hasTotal = unmatched.some((x) => x.order_id === u.order_id && x.key.startsWith("order:"));
+			if (hasTotal ? !u.key.startsWith("order:") : u.key.startsWith("allship:")) continue;
+		}
+		out.push(u);
+	}
+	return out;
+}
+
 /** One-to-one matching: exact amounts first, then estimated grocery totals within 20%, closest dates first. */
 export function matchCharges(txns: Txn[], units: Unit[]) {
 	const pairs: { t: Txn; u: Unit; exact: boolean; gap: number }[] = [];
@@ -271,21 +323,10 @@ export async function amazonPurchases(env: Env, start: string, end: string) {
 		items.push(...(await env.DB.prepare(`SELECT * FROM amazon_items WHERE order_id IN (${ph})`).bind(...chunk).all()).results);
 	}
 
-	// What the card gets charged for: each shipment with a total; orders with no such shipment are charged as a whole.
-	const units: Unit[] = shipments.map((s) => ({ key: s.email_id, order_id: s.order_id, date: s.date, amount: s.amount, estimate: false, kind: "shipment" as const }));
-	const shippedOrders = new Set(shipments.map((s) => s.order_id));
-	for (const o of orders) {
-		if (o.order_total === null) continue;
-		const sumShip = shipments.filter((s) => s.order_id === o.order_id).reduce((a, s) => a + s.amount, 0);
-		if (!shippedOrders.has(o.order_id) || Math.abs(sumShip - o.order_total) > 0.005 && sumShip < o.order_total) {
-			// No shipment totals (e.g. grocery), or shipments don't add up yet: the order total is also a candidate.
-			units.push({ key: "order:" + o.order_id, order_id: o.order_id, date: o.order_date, amount: shippedOrders.has(o.order_id) ? o.order_total - sumShip : o.order_total,
-				estimate: !!o.total_is_estimate, kind: "order" });
-		}
-	}
-
-	const charges = txns.filter((t) => t.amount > 0 && !isPrimeMembership(t));
+	const units = chargeUnits(orders, shipments);
+	const charges = txns.filter((t) => t.amount > 0 && !isPrimeMembership(t) && !isPharmacy(t));
 	const { matches, unmatchedUnits } = matchCharges(charges, units);
+	const notChargedYet = pendingUnits(units, unmatchedUnits);
 	const describe = (order_id: string) => {
 		const o = orderById.get(order_id);
 		const its = items.filter((i) => i.order_id === order_id).map((i) => ({ title: i.title, quantity: i.quantity, unit_price: i.unit_price }));
@@ -301,11 +342,18 @@ export async function amazonPurchases(env: Env, start: string, end: string) {
 		const base = { date: t.date, amount: t.amount, description: t.description, pending: !!t.pending };
 		if (t.amount < 0) return { ...base, kind: "refund_or_credit" };
 		if (isPrimeMembership(t)) return { ...base, kind: "prime_membership" };
+		if (isPharmacy(t)) return { ...base, kind: "pharmacy", hint: "Amazon Pharmacy charge. Pharmacy emails are not read (health information); see pharmacy.amazon.com for the order." };
 		const m = matches.get(t.transaction_id);
 		if (!m) return { ...base, kind: "unmatched", hint: "No Amazon email with this amount near this date (gift card balance, digital order, or emails not synced yet)." };
 		return { ...base, kind: m.unit.kind === "shipment" ? "shipment" : "order", match: m.exact ? "exact_amount" : "estimated_total", order: describe(m.unit.order_id) };
 	});
-	const pending = unmatchedUnits.filter((u) => inRange(u.date)).map((u) => ({ ...describe(u.order_id), not_charged_yet_amount: u.amount }));
+	const today = new Date().toISOString().slice(0, 10);
+	const pending = notChargedYet.filter((u) => inRange(u.date)).map((u) => ({
+		...describe(u.order_id), not_charged_yet_amount: round2(u.amount),
+		// Amazon charges within days of shipping; an old order with no matching charge was most likely paid
+		// with a card that isn't linked, a gift card balance, or was cancelled.
+		...(daysBetween(u.date, today) > 14 ? { likely: "paid with another card or gift card, or cancelled" } : {}),
+	}));
 	const missingNames = new Set(rows.flatMap((r: any) => r.order && !r.order.items ? [r.order.order_id] : []));
 	return {
 		start_date: start, end_date: end,
