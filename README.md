@@ -72,7 +72,7 @@ npx wrangler d1 execute finance --remote --file=schema.sql   # adds the amazon_*
 npx wrangler deploy                                            # adds the tools and the :30 cron
 ..\.venv\Scripts\python google_auth.py                         # one-time Gmail sign-in (steps in the docstring)
 ```
-A second cron (`30 */4 * * *`) reads new Amazon mail; the first sync goes back 180 days, 40 emails per run.
+A second cron (`30 */4 * * *`) reads new Amazon mail; each sync covers the last 180 days and reads up to 40 new emails per run, so a backlog drains over several runs.
 
 ## Notes
 - First transaction sync can take a few minutes on Plaid's side; if it comes back empty, sync again later.

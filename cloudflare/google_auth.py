@@ -54,8 +54,9 @@ def get_code(client_id: str) -> tuple[str, str]:
         "client_id": client_id, "redirect_uri": redirect, "response_type": "code", "scope": SCOPE,
         "access_type": "offline", "prompt": "consent", "state": state,
     })
-    print("Opening Google sign-in. If no browser opens, visit:\n" + url)
-    webbrowser.open(url)
+    print("Opening Google sign-in. If no browser opens, visit:\n" + url, flush=True)
+    if "--no-browser" not in sys.argv:  # --no-browser: only print the link
+        webbrowser.open(url)
     while not result:
         server.handle_request()
     server.server_close()
@@ -67,8 +68,15 @@ def get_code(client_id: str) -> tuple[str, str]:
 
 
 def main() -> None:
-    client_id = input("OAuth client ID (Desktop app): ").strip()
-    client_secret = getpass.getpass("OAuth client secret (hidden): ").strip()
+    if "--client-json" in sys.argv:
+        # The JSON downloaded from Google Cloud -> Clients -> Download JSON. The secret is never printed.
+        path = Path(sys.argv[sys.argv.index("--client-json") + 1])
+        info = json.loads(path.read_text(encoding="utf-8"))
+        info = info.get("installed") or info.get("web") or {}
+        client_id, client_secret = info.get("client_id", ""), info.get("client_secret", "")
+    else:
+        client_id = input("OAuth client ID (Desktop app): ").strip()
+        client_secret = getpass.getpass("OAuth client secret (hidden): ").strip()
     if not client_id or not client_secret:
         sys.exit("Client ID and secret are required.")
     code, redirect = get_code(client_id)

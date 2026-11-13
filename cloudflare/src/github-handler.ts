@@ -202,4 +202,28 @@ app.get("/callback", async (c) => {
 	});
 });
 
+// Public pages required by Google's OAuth consent screen (homepage + privacy policy).
+const PAGE = (title: string, body: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title>
+<style>body{font:16px/1.6 system-ui,sans-serif;max-width:640px;margin:48px auto;padding:0 16px;color:#1a1a1a}</style>
+</head><body>${body}</body></html>`;
+
+app.get("/", (c) => c.html(PAGE("Finance (aryanh.dev)", `<h1>Finance</h1>
+<p>A private, read-only personal finance server used by one person (the owner of aryanh.dev).
+It is not a public service and does not accept new users.</p><p><a href="/privacy">Privacy policy</a></p>`)));
+
+app.get("/privacy", (c) => c.html(PAGE("Privacy policy", `<h1>Privacy policy</h1>
+<p>This server is a personal tool used only by its owner. No one else can sign in.</p>
+<h2>Gmail data</h2>
+<p>With the owner's permission it reads Amazon order and shipping emails (read-only Gmail access) to match
+Amazon card charges to orders. It stores only order numbers, dates, totals and Amazon's short category
+headings. It never sends, changes or deletes email, and never reads other messages beyond what Gmail's search
+for Amazon's sender addresses returns.</p>
+<h2>Sharing</h2>
+<p>Data is stored in the owner's Cloudflare account and is not sold, shared or used for advertising.
+The use of information received from Google APIs adheres to the Google API Services User Data Policy,
+including the Limited Use requirements.</p>
+<h2>Removal</h2>
+<p>Access can be revoked at any time at myaccount.google.com/permissions; stored data is deleted on request.</p>`)));
+
 export { app as GitHubHandler };

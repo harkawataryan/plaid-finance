@@ -8,8 +8,9 @@ const AMAZON_SENDERS = [
 	"order-update@amazon.com",       // "Delivered ...", grocery updates
 	"digital-no-reply@amazon.com",   // Kindle / digital orders
 ];
-const FIRST_SYNC_DAYS = 180;      // how far back the first sync reads
-const LOOKBACK_DAYS = 30;         // later syncs re-list this window (already-read mail is skipped)
+// Every sync lists this whole window and skips mail it has already read, so a backlog bigger than
+// one run (MAX_MESSAGES_PER_RUN) keeps draining on later runs instead of being cut off.
+const SYNC_WINDOW_DAYS = 180;
 const MAX_MESSAGES_PER_RUN = 40;  // stays under the Workers subrequest limit; the rest is read next run
 export const LOCAL_TZ = "America/Chicago";
 
@@ -150,9 +151,7 @@ export async function syncAmazon(env: AmazonEnv) {
 		return { error: "Gmail is not connected: set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET / GOOGLE_REFRESH_TOKEN (run google_auth.py)" };
 	const token = await googleAccessToken(env);
 
-	const seenCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM amazon_emails").first<{ n: number }>();
-	const days = (seenCount?.n ?? 0) === 0 ? FIRST_SYNC_DAYS : LOOKBACK_DAYS;
-	const q = `from:(${AMAZON_SENDERS.join(" OR ")}) newer_than:${days}d`;
+	const q = `from:(${AMAZON_SENDERS.join(" OR ")}) newer_than:${SYNC_WINDOW_DAYS}d`;
 
 	// List ids (newest first). Each page is one subrequest, so cap the pages.
 	const ids: string[] = [];
