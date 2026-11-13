@@ -19,11 +19,12 @@
   "kv_namespaces": [
     { "binding": "OAUTH_KV", "id": "167c22051d974c5a965d98fa3cff8274" }
   ],
-  // Sync from Plaid every 4 hours (UTC).
-  "triggers": { "crons": ["0 */4 * * *"] },
+  // Plaid sync every 4 hours (UTC); Amazon emails from Gmail 30 minutes later (see AMAZON_CRON in src/index.ts).
+  "triggers": { "crons": ["0 */4 * * *", "30 */4 * * *"] },
   "observability": { "enabled": true },
   "dev": { "port": 8788 },
   "secrets": {
     "required": ["PLAID_CLIENT_ID", "PLAID_SECRET", "GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "COOKIE_ENCRYPTION_KEY"]
+    // Optional, for Amazon orders: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN (set by google_auth.py)
   }
 }

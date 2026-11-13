@@ -7,6 +7,7 @@ import { createMcpHandler, getMcpAuthContext } from "agents/mcp/server";
 import { z } from "zod";
 import { GitHubHandler } from "./github-handler";
 import { syncAll } from "./sync";
+import { amazonPurchases, syncAmazon, type AmazonEnv } from "./amazon";
 import type { Props } from "./utils";
 
 const LIABILITY = "('credit','loan')";
@@ -14,6 +15,7 @@ const LIABILITY = "('credit','loan')";
 const TRANSFERS = "('TRANSFER_IN','TRANSFER_OUT','LOAN_PAYMENTS')";
 
 const env = globalEnv as unknown as Env;
+const AMAZON_CRON = "30 */4 * * *"; // must match wrangler.jsonc
 
 async function rows(sql: string, ...params: unknown[]): Promise<any[]> {
 	const { results } = await env.DB.prepare(sql).bind(...params).all();
@@ -36,7 +38,8 @@ function createServer() {
 		instructions:
 			"Read-only access to the user's synced bank (UFCU) and brokerage (Robinhood) data via Plaid. " +
 			"Transaction amount > 0 means money spent / left the account; < 0 means money received. " +
-			"Data syncs automatically every 4 hours.",
+			"Data syncs automatically every 4 hours. Amazon orders come from Amazon's emails in Gmail: use amazon_purchases " +
+				"to see which order each Amazon card charge paid for.",
 	});
 	const props = getMcpAuthContext()?.props as Props | undefined;
 	// Defense in depth: the GitHub callback already refuses other accounts.
@@ -176,6 +179,45 @@ amount > 0 = cash left the brokerage account (e.g. a buy); amount < 0 = cash cam
 		return json({ start_date: start, end_date: end, count: r.length, transactions: r });
 	});
 
+	server.registerTool("sync_amazon", {
+		description: "Read new Amazon order / shipping emails from Gmail now (also runs automatically every 4 hours).",
+	}, async () => json(await syncAmazon(env as AmazonEnv)));
+
+	server.registerTool("amazon_purchases", {
+		description: `Amazon card charges in a date range (default last 30 days), each matched to the Amazon order or shipment
+it paid for: order id, Amazon's category heading (e.g. "1 item: Supplements"), product names when imported, and a link
+to the order. Also lists Prime membership charges, refunds, charges with no matching email, and orders not charged yet.
+Matching is by exact amount (Amazon charges per shipment) within a few days of the email.`,
+		inputSchema: z.object({ start_date: z.string().optional(), end_date: z.string().optional() }),
+	}, async (a) => {
+		const [start, end] = range(a.start_date, a.end_date);
+		return json(await amazonPurchases(env, start, end));
+	});
+
+	server.registerTool("add_amazon_items", {
+		description: `Save the product names in Amazon orders (Amazon's emails don't include them). Use after reading an
+order page, e.g. https://www.amazon.com/your-orders/order-details?orderID=<id> in the user's browser. Replaces the
+items stored for each order given. Only writes Amazon product names; nothing else in the database changes.`,
+		inputSchema: z.object({
+			orders: z.array(z.object({
+				order_id: z.string(),
+				items: z.array(z.object({
+					title: z.string(), quantity: z.number().default(1),
+					unit_price: z.number().optional(), asin: z.string().optional(),
+				})).min(1),
+			})).min(1),
+		}),
+	}, async ({ orders }) => {
+		const stmts: D1PreparedStatement[] = [];
+		for (const o of orders) {
+			stmts.push(env.DB.prepare("DELETE FROM amazon_items WHERE order_id=?").bind(o.order_id));
+			for (const it of o.items) stmts.push(env.DB.prepare("INSERT OR REPLACE INTO amazon_items VALUES (?,?,?,?,?,?)")
+				.bind(o.order_id, it.title, it.quantity, it.unit_price ?? null, it.asin ?? null, "browser"));
+		}
+		await env.DB.batch(stmts);
+		return json({ saved_orders: orders.length, saved_items: orders.reduce((n, o) => n + o.items.length, 0) });
+	});
+
 	server.registerTool("query_finance_db", {
 		description: `Run a read-only SQL SELECT on the finance database for questions the other tools don't cover.
 Tables: accounts(account_id, institution_name, name, mask, type, subtype, current_balance,
@@ -187,6 +229,9 @@ securities(security_id, name, ticker, type, close_price, close_price_as_of)
 holdings(account_id, security_id, quantity, price, value, cost_basis, price_as_of)
 investment_transactions(investment_transaction_id, account_id, security_id, date, name, type,
   subtype, quantity, price, amount, fees)
+amazon_orders(order_id, order_date, summary, order_total, total_is_estimate, status, updated_at)
+amazon_shipments(email_id, order_id, date, summary, amount)  -- amount = what the card is charged per shipment
+amazon_items(order_id, title, quantity, unit_price, asin, source)
 Dates are 'YYYY-MM-DD' text. Results are capped at 1000 rows.`,
 		inputSchema: z.object({ sql: z.string() }),
 	}, async ({ sql }) => {
@@ -216,7 +261,9 @@ const provider = new OAuthProvider<Env>({
 
 export default {
 	fetch: (req: Request, e: Env, ctx: ExecutionContext) => provider.fetch(req, e, ctx),
-	async scheduled(_c: ScheduledController, e: Env, ctx: ExecutionContext) {
-		ctx.waitUntil(syncAll(e).then((r) => console.log("sync", JSON.stringify(r))));
+	async scheduled(c: ScheduledController, e: Env, ctx: ExecutionContext) {
+		// Separate cron entries so Plaid and Gmail each get their own subrequest budget.
+		if (c.cron === AMAZON_CRON) ctx.waitUntil(syncAmazon(e as AmazonEnv).then((r) => console.log("amazon", JSON.stringify(r))));
+		else ctx.waitUntil(syncAll(e).then((r) => console.log("sync", JSON.stringify(r))));
 	},
 } satisfies ExportedHandler<Env>;

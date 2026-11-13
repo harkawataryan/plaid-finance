@@ -77,3 +77,38 @@ CREATE TABLE IF NOT EXISTS investment_transactions (
     amount      REAL,                   -- > 0 cash out of account (e.g. buy), < 0 cash in (e.g. sell, dividend)
     fees        REAL
 );
+
+-- ---- Amazon orders (from Amazon's order/shipping emails in Gmail; product names imported separately) ----
+CREATE TABLE IF NOT EXISTS amazon_orders (
+    order_id          TEXT PRIMARY KEY,   -- e.g. 114-9970154-7175459
+    order_date        TEXT,               -- local date of the earliest email seen for the order
+    summary           TEXT,               -- Amazon's email heading, e.g. "1 item: Phone Accessories"
+    order_total       REAL,               -- grand total from the order confirmation
+    total_is_estimate INTEGER DEFAULT 0,  -- 1 for grocery orders whose final charge can change
+    status            TEXT,               -- ordered | shipped | delivered
+    updated_at        TEXT
+);
+-- One row per "Shipped" email that states a total: Amazon charges the card per shipment.
+CREATE TABLE IF NOT EXISTS amazon_shipments (
+    email_id TEXT PRIMARY KEY,
+    order_id TEXT,
+    date     TEXT,
+    summary  TEXT,
+    amount   REAL
+);
+CREATE TABLE IF NOT EXISTS amazon_items (
+    order_id   TEXT,
+    title      TEXT,
+    quantity   REAL,
+    unit_price REAL,
+    asin       TEXT,
+    source     TEXT,                      -- export | browser | manual
+    PRIMARY KEY (order_id, title)
+);
+-- Gmail messages already processed, so each sync only reads new mail.
+CREATE TABLE IF NOT EXISTS amazon_emails (
+    email_id   TEXT PRIMARY KEY,
+    kind       TEXT,
+    order_ids  TEXT,
+    parsed_at  TEXT
+);

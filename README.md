@@ -56,6 +56,24 @@ into D1 (`npx wrangler d1 execute finance --remote --command "INSERT ..."`) and 
 Other ways to run it: `remote_server.py` serves the local database through a private ngrok link
 while the PC is on, and `scheduled_sync.py` is a Task Scheduler entry point for local syncing.
 
+## 6. Amazon orders (hosted version only)
+Amazon has no order API for shoppers, so the Worker reads Amazon's own order/shipping emails from Gmail
+(read-only) and matches each Amazon card charge to its order by exact amount. Amazon charges per shipment,
+and "Shipped" emails state that amount. Tools: `sync_amazon`, `amazon_purchases`, `add_amazon_items`.
+
+Amazon's emails name only a category ("1 item: Supplements"), not the product. Names come from
+`add_amazon_items` (Claude reads the order page in your browser) or from Amazon's data export via
+`amazon_export_import.py` (see the docstring).
+
+Setup:
+```
+cd cloudflare
+npx wrangler d1 execute finance --remote --file=schema.sql   # adds the amazon_* tables
+npx wrangler deploy                                            # adds the tools and the :30 cron
+..\.venv\Scripts\python google_auth.py                         # one-time Gmail sign-in (steps in the docstring)
+```
+A second cron (`30 */4 * * *`) reads new Amazon mail; the first sync goes back 180 days, 40 emails per run.
+
 ## Notes
 - First transaction sync can take a few minutes on Plaid's side; if it comes back empty, sync again later.
 - If a bank asks you to log in again (`ITEM_LOGIN_REQUIRED`), rerun `link_server.py` and reconnect it.
